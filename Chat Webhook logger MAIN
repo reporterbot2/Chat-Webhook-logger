@@ -1,0 +1,135 @@
+local HttpService = game:GetService("HttpService")
+
+-- Replace with your actual webhook URLs
+local discordWebhookUrl = ""
+local guildedWebhookUrl = ""
+local botAvatarUrl = "https://i.imgur.com/714euZq.png"
+
+local moderatorGroupId = 1234567890
+local moderatorRoleName = "Chat-Logs Moderator"
+
+-- Table to track spam detection
+local playerMessageCounts = {}
+
+-- Function to check if the player is a Chat-Logger Moderator
+local function isModerator(player)
+	local success, result = pcall(function()
+		local member = player:GetRoleInGroup(moderatorGroupId)
+		return member == moderatorRoleName
+	end)
+
+	return success and result
+end
+
+-- Function to get account age category
+local function getAccountAgeCategory(player)
+	local accountAge = player.AccountAge
+
+	if accountAge >= 17 then
+		return "17+"
+	elseif accountAge >= 13 then
+		return "13+"
+	else
+		return "13>"
+	end
+end
+
+-- Function to get the player role in a group
+local function getPlayerRoleInGroup(player)
+	return player:GetRoleInGroup(moderatorGroupId)
+end
+
+-- Function to detect and format spam inside a message
+local function detectSpam(message)
+	local words = {}
+	local wordCounts = {}
+
+	-- Split message into words
+	for word in message:gmatch("%S+") do
+		word = word:lower()  -- Normalize to lowercase
+		if not wordCounts[word] then
+			wordCounts[word] = 1
+			table.insert(words, word) -- Maintain order
+		else
+			wordCounts[word] = wordCounts[word] + 1
+		end
+	end
+
+	-- Reconstruct message, replacing repeated words with "word xN"
+	local filteredMessage = ""
+	for _, word in ipairs(words) do
+		if wordCounts[word] > 1 then
+			filteredMessage = filteredMessage .. word .. " x" .. wordCounts[word] .. " "
+		else
+			filteredMessage = filteredMessage .. word .. " "
+		end
+	end
+
+	return filteredMessage:sub(1, -2) -- Trim trailing space
+end
+
+-- Function to send an embed message to Discord and Guilded
+local function sendMessageToWebhooks(player, filteredMessage, footerText, channelName)
+	local embed = {
+		["title"] = "Logged Message",
+		["color"] = 16776960,
+		["fields"] = {
+			{["name"] = "**Player Username:**", ["value"] = player.Name, ["inline"] = false},
+			{["name"] = "**Player Message:**", ["value"] = filteredMessage, ["inline"] = false},
+			{["name"] = "**Place ID:**", ["value"] = game.PlaceId, ["inline"] = false},
+			{["name"] = "**Group Role:**", ["value"] = getPlayerRoleInGroup(player), ["inline"] = false},
+			{["name"] = "**Account Age:**", ["value"] = player.AccountAge .. " days", ["inline"] = false},
+			{["name"] = "**Age Category:**", ["value"] = getAccountAgeCategory(player), ["inline"] = false},
+			{["name"] = "**Channel message was sent in:**", ["value"] = channelName, ["inline"] = false}
+		},
+		["footer"] = {["text"] = footerText},
+		["image"] = {["url"] = "https://i.imgur.com/GUqbBIh.jpeg"}
+	}
+
+	local payload = {
+		["username"] = "Chat Logger",
+		["avatar_url"] = botAvatarUrl,
+		["embeds"] = {embed}
+	}
+
+	local jsonData = HttpService:JSONEncode(payload)
+
+	-- Send message to Discord
+	local success, response = pcall(function()
+		return HttpService:PostAsync(discordWebhookUrl, jsonData, Enum.HttpContentType.ApplicationJson, false)
+	end)
+
+	if not success then
+		warn("⚠️ Failed to send message to Discord: " .. tostring(response))
+	else
+		print("✅ Message sent to Discord!")
+	end
+
+	-- Send message to Guilded
+	local successGuilded, responseGuilded = pcall(function()
+		return HttpService:PostAsync(guildedWebhookUrl, jsonData, Enum.HttpContentType.ApplicationJson, false)
+	end)
+
+	if not successGuilded then
+		warn("⚠️ Failed to send message to Guilded: " .. tostring(responseGuilded))
+	else
+		print("✅ Message sent to Guilded!")
+	end
+end
+
+-- Function to process chat messages
+local function checkMessage(player, message, channelName)
+	local footerText = "Roblox Chat Logger"
+	local filteredMessage = detectSpam(message) -- Apply anti-spam filter
+
+	sendMessageToWebhooks(player, filteredMessage, footerText, channelName)
+end
+
+-- Listen for chat messages from all players
+game.Players.PlayerAdded:Connect(function(player)
+	player.Chatted:Connect(function(message)
+		local channelName = "General Chat"  -- Placeholder, customize if needed
+		print("[CHAT] " .. player.Name .. ": " .. message)  -- Debug print
+		checkMessage(player, message, channelName)
+	end)
+end)
